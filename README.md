@@ -15,32 +15,38 @@ Open `home.md` in Obsidian to see everything.
 
 ## Quick start
 
+**Windows (zero prereqs — opens PowerShell):**
+```powershell
+# 1. Use this template on GitHub, clone your new repo, then:
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+.\scripts\bootstrap.ps1
+```
+
+**Linux / macOS:**
 ```bash
-# 1. Use this template on GitHub, then clone your new repo
-git clone https://github.com/<you>/autonomous-workspace
-cd autonomous-workspace
+git clone <your-repo> && cd autonomous-workspace
+bash scripts/bootstrap.sh
+```
 
-# 2. Install dependencies
-npm install -g @anthropic-ai/claude-code
-# Install Taskfile: https://taskfile.dev/installation/
+**After bootstrap completes:**
+```bash
+# 2. Log into Bitwarden and add secrets
+bw login
+task secrets:set -- ANTHROPIC_API_KEY <key>   # skip if using Claude Pro
+task secrets:pull                              # writes .env
 
-# 3. Run setup (makes hooks executable, installs git hooks)
-task setup
+# 3. Add a project
+# Edit queue.md and fill out the template
 
-# 4. Add a project — edit queue.md and fill out the template
-#    (see queue.md for the template)
-
-# 5. Plan it (planner-opus creates scope + stages, you review)
+# 4. Plan it (planner-opus creates scope + stages, you review)
 task plan:queue
-
-# 6. Approve the plan
 task plan:review
 task plan:approve -- <project-name>
 
-# 7. Run tonight
+# 5. Run tonight
 task agent:run
 
-# 8. Review in the morning
+# 6. Review in the morning
 task morning:review
 ```
 
@@ -104,8 +110,10 @@ repo/
 |-------|-------------|
 | PreToolUse hooks | Block dangerous bash commands and protected file writes |
 | Worktree isolation | Each agent gets its own branch — main is never touched |
-| Local git hooks | pre-push blocks direct pushes to main |
+| Local git hooks | pre-push blocks direct pushes to main from agent worktrees |
 | GitHub branch protection | Server-side enforcement regardless of local config |
+
+Run `task hooks:test` at any time to verify all 37 safety checks pass.
 
 ## Planning pipeline (new projects)
 
@@ -157,11 +165,38 @@ Off-peak window (10 PM – 5 AM PT) burns the quota slower — schedule runs her
 
 ## Requirements
 
-- Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
-- Taskfile (`https://taskfile.dev/installation/`)
-- GitHub CLI (`gh`) — optional, for PR automation
-- jq — for hook JSON parsing (`brew install jq` / `apt install jq`)
-- Obsidian — for vault UI (free download at obsidian.md)
+`scripts/bootstrap.ps1` (Windows) or `scripts/bootstrap.sh` (Linux/macOS) installs everything automatically. Manual prereqs:
+
+| Tool | Auto-installed | Notes |
+|------|---------------|-------|
+| Node.js | Yes (via winget/brew/apt) | Required first on Windows |
+| Git + Git Bash | Yes (via winget/brew/apt) | Required first on Windows |
+| Bitwarden CLI (`bw`) | Yes (via npm) | |
+| Taskfile (`task`) | Yes (via npm/winget/brew) | |
+| GitHub CLI (`gh`) | Yes (via winget/brew/apt) | Optional — for PR automation |
+| jq | Yes (via winget/brew/apt) | Required for hook JSON parsing |
+| Claude Code CLI | Yes (via npm) | |
+| Obsidian | No | Free download at obsidian.md — open repo as vault |
+
+## Secrets
+
+All secrets live in **Bitwarden**, never in the repository. Naming convention:
+
+```
+autonomous-workspace/KEY_NAME
+```
+
+```bash
+task secrets:set -- KEY_NAME value   # store in Bitwarden
+task secrets:pull                    # sync vault to .env (gitignored)
+task secrets:list                    # show available keys
+```
+
+See `.env.example` for the full list of keys the workspace expects.
+
+**For nightly unattended runs**, store your Bitwarden API credentials as
+Windows user environment variables (`BW_CLIENTID`, `BW_CLIENTSECRET`, `BW_PASSWORD`)
+so the vault unlocks without a prompt.
 
 ## Authentication
 
@@ -169,30 +204,28 @@ This workspace works with either a **Claude Pro/Max subscription** or an **Anthr
 
 **Claude Pro/Max (no API key needed):**
 ```bash
-# Claude Code uses your browser login automatically
-claude login
+claude login   # one-time browser login; session persists for nightly runs
 ```
 
 **Anthropic API key:**
 ```bash
-export ANTHROPIC_API_KEY=your_key_here
+task secrets:set -- ANTHROPIC_API_KEY your_key_here
+task secrets:pull
 ```
 
-The main difference: Pro/Max subscriptions have a 5-hour usage window with rate limits, while API access is pay-per-token. The workspace handles both — the `stop-write-back.sh` hook writes `paused_usage_limit` state when the usage window is hit, and the next run resumes automatically.
-
-For project secrets (API keys your agents need), use Bitwarden CLI:
-```bash
-bw get password "project-name/service-name"
-```
+The main difference: Pro/Max has a 5-hour usage window with rate limits; API access is pay-per-token. The workspace handles both — the `stop-write-back.sh` hook writes `paused_usage_limit` state when the window is hit, and the next run resumes automatically.
 
 ## New machine setup
 
 ```bash
-git clone <repo>
-cd <repo>
-task setup
-# Open repo as Obsidian vault — everything is already there
-```
+# Windows (PowerShell — zero prereqs)
+.\scripts\bootstrap.ps1
 
-That's it. The full project history, decisions, metrics, skills library,
-and agent configuration restore on clone.
+# Linux / macOS
+bash scripts/bootstrap.sh
+
+# Then:
+bw login
+task secrets:pull
+# Open repo as Obsidian vault — full history, skills, and config restore on clone
+```

@@ -302,12 +302,16 @@ tasks:
           mkdir -p .git/hooks
           {
             echo '#!/usr/bin/env bash'
-            echo 'while read -r local_ref local_sha remote_ref remote_sha; do'
-            echo '  if echo "$remote_ref" | grep -qE "refs/heads/(main|master)$"; then'
-            echo '    echo "ERROR: Direct push to main/master blocked."'
-            echo '    exit 1'
-            echo '  fi'
-            echo 'done'
+            echo '# Block direct pushes to main/master ONLY from agent worktrees.'
+            echo 'WORKTREE_PATH=$(git rev-parse --show-toplevel 2>/dev/null || echo "")'
+            echo 'if echo "$WORKTREE_PATH" | grep -qE "agent-"; then'
+            echo '  while read -r local_ref local_sha remote_ref remote_sha; do'
+            echo '    if echo "$remote_ref" | grep -qE "refs/heads/(main|master)$"; then'
+            echo '      echo "ERROR: Direct push to main/master blocked in agent worktree."'
+            echo '      exit 1'
+            echo '    fi'
+            echo '  done'
+            echo 'fi'
             echo 'exit 0'
           } > .git/hooks/pre-push
           chmod +x .git/hooks/pre-push 2>/dev/null || true

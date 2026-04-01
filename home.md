@@ -1,7 +1,7 @@
 # Home
 
 > Master index — updated automatically by the docs-writer agent after every overnight run.
-> Last updated: manually initialized
+> Last updated: 2026-04-01 (setup session — Bitwarden + bootstrap + safety hardening)
 
 ## System status
 
@@ -14,6 +14,9 @@
 | Skills in library | 8 |
 | Last overnight run | — |
 | Next scheduled run | tonight 10:00 PM |
+| Secrets backend | Bitwarden (`autonomous-workspace/*`) |
+| Auth | Claude Pro (account session) |
+| Safety | bypassPermissions + hook guards (37/37 tests pass) |
 
 ## Projects
 
@@ -57,4 +60,14 @@ task agent:diff          # show what changed overnight
 task agent:discard NAME  # remove a worktree and its branch
 task morning:review      # open this file + show PRs + show escalations
 task skill:create NAME   # scaffold a new skill
+task hooks:test          # verify all safety hooks (run after any hook change)
+task secrets:pull        # sync Bitwarden vault to .env
+task secrets:set -- K V  # store a new secret in Bitwarden
+task setup               # full new-machine setup (deps + hooks + secrets check)
 ```
+
+## Recent sessions
+
+| Date | Type | Summary | Tokens (est.) |
+|------|------|---------|---------------|
+| 2026-04-01 | Setup | Bitwarden integration, bootstrap scripts, hook hardening | ~198k |
