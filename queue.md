@@ -41,4 +41,17 @@ Fill out one entry below. The more context you provide, the better the plan.
 
 ---
 
+## workspace-session-telemetry
+
+**goal:** Make session token logging and home.md updates automatic — zero manual steps after any session.
+**context:** Currently metrics/tokens.md and home.md are updated manually. The stop-write-back.sh hook already fires at session end and has access to token counts. home.md has a Recent Sessions table that should self-update. The docs-writer skill exists but hasn't been wired to the workspace-level files yet.
+**non_goals:** Per-project burndown or stages tracking (already handled by docs-writer skill). External analytics dashboards.
+**tech_hints:** Extend stop-write-back.sh or docs-writer skill. Token counts come from the Stop hook payload. home.md update should be idempotent (prepend new row to Recent Sessions table).
+**priority:** high
+**token_budget_est:** small (~30k)
+**external_deps:** None.
+**references:** `.claude/hooks/stop-write-back.sh`, `.claude/skills/docs-writer/SKILL.md`, `metrics/tokens.md`, `home.md`
+
+---
+
 _Add your projects above this line_
