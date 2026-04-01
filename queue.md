@@ -37,7 +37,7 @@ Fill out one entry below. The more context you provide, the better the plan.
 **priority:** high
 **token_budget_est:** medium (~80k)
 **external_deps:** None — all internal.
-**references:** See projects/existing-auth for current implementation patterns.
+**references:** —
 
 ---
 

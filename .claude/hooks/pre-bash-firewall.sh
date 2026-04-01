@@ -18,13 +18,12 @@ block() {
 
 # ── Absolute destroyers ──────────────────────────────────────────────────────
 
-# rm on root, home, or bare tilde
-echo "$CMD" | grep -qE 'rm\s+-[rf]+\s+(/[^a-zA-Z]|/$|~/?$|~/[^/])' \
-  && block "rm on root or home directory"
+# rm on any absolute path or bare tilde — too risky at that scope
+echo "$CMD" | grep -qE 'rm\s+-[rf]+\s+/' \
+  && block "rm -rf on absolute path (use relative paths inside your worktree)"
 
-# Tilde directory expansion trap (~/ inside rm)
-echo "$CMD" | grep -qE 'rm\s+.*\s+~/?\s*$' \
-  && block "ambiguous tilde expansion in rm"
+echo "$CMD" | grep -qE 'rm\s+-[rf]+\s+~' \
+  && block "rm -rf on tilde path (home directory scope)"
 
 # ── Remote code execution ────────────────────────────────────────────────────
 

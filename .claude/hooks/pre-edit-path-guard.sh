@@ -18,8 +18,11 @@ block() {
 
 # ── Protected files ──────────────────────────────────────────────────────────
 
-# Env files
-echo "$FILE" | grep -qE '\.env($|\.)' && block ".env file — use Bitwarden Secrets Manager"
+# Env files — block .env and variants, but allow .env.example (safe to commit)
+if echo "$FILE" | grep -qE '\.env($|\.)'; then
+  echo "$FILE" | grep -qE '\.env\.example$' \
+    || block ".env file — use Bitwarden Secrets Manager"
+fi
 
 # Node internals
 echo "$FILE" | grep -qE 'node_modules/' && block "node_modules are read-only"

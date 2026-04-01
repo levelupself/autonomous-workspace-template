@@ -86,6 +86,39 @@ Check `.claude/skills/` before implementing anything. Key skills:
 - `security-scan` — semgrep vulnerability scan
 - `burndown-updater` — recalculate burndown from stages.md
 
+## Secrets protocol
+
+Secrets (API keys, tokens, passwords) are stored in Bitwarden, not in files.
+
+**Reading secrets:** The `.env` file is populated from Bitwarden at session start via
+`task secrets:pull`. Load it if you need env vars:
+```bash
+set -a; source .env; set +a
+```
+or read the file directly — it is `.gitignore`d and safe to use locally.
+
+**Naming convention:** Every secret is a Bitwarden Login item named:
+```
+autonomous-workspace/KEY_NAME
+```
+The value lives in the Password field. Examples:
+- `autonomous-workspace/ANTHROPIC_API_KEY`
+- `autonomous-workspace/GITHUB_TOKEN`
+- `autonomous-workspace/PROJECT_NAME_SECRET`
+
+**Adding a new secret:**
+```bash
+task secrets:set -- KEY_NAME value
+```
+
+**Never:**
+- Hard-code secrets in any file (source, config, markdown)
+- Commit `.env` or any file containing secrets
+- Log secret values in output or stages.md
+
+**If `.env` is missing:** write to `docs/blockers.md` with type `external_access_needed`
+and note that `task secrets:pull` must be run before the session can continue.
+
 ## What NOT to do
 
 - Do not ask for permission for things within your stated scope

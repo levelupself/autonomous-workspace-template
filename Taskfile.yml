@@ -5,24 +5,34 @@ vars:
 
 tasks:
 
-  setup:
-    desc: "Initialize workspace on a new machine"
+  deps:install:
+    desc: "Install all workspace dependencies (run this on a new machine first)"
     cmds:
+      - cmd: bash scripts/install-deps.sh
+
+  setup:
+    desc: "Initialize workspace on a new machine (run after deps:install)"
+    cmds:
+      - task: deps:install
       - cmd: |
-          echo "Setting up autonomous dev workspace..."
+          echo "Configuring workspace..."
           chmod +x .claude/hooks/*.sh 2>/dev/null || echo "(chmod skipped on Windows)"
+          chmod +x scripts/*.sh 2>/dev/null || true
           chmod +x .claude/skills/jwt-validator/scripts/validate.sh 2>/dev/null || true
           chmod +x .claude/skills/schema-retry/scripts/retry.sh 2>/dev/null || true
-          mkdir -p .git/hooks
-          printf '#!/usr/bin/env bash\nwhile IFS=\' \' read -r local_ref local_sha remote_ref remote_sha; do\n  if echo "$remote_ref" | grep -qE \'refs/heads/(main|master)$\'; then\n    echo "ERROR: Direct push to main/master blocked."\n    exit 1\n  fi\ndone\nexit 0\n' > .git/hooks/pre-push
-          chmod +x .git/hooks/pre-push 2>/dev/null || true
+      - task: git:hooks
+      - task: hooks:test
+      - task: secrets:check
+      - cmd: |
           echo ""
           echo "Setup complete. Next steps:"
-          echo "  1. Add a project to queue.md"
-          echo "  2. task plan:queue"
-          echo "  3. task plan:review"
-          echo "  4. task plan:approve -- your-project"
-          echo "  5. task agent:run"
+          echo "  1. bw login                              (authenticate Bitwarden)"
+          echo "  2. task secrets:set -- ANTHROPIC_API_KEY <key>"
+          echo "  3. task secrets:set -- GITHUB_TOKEN <token>"
+          echo "  4. task secrets:pull                     (write .env)"
+          echo "  5. Add a project to queue.md"
+          echo "  6. task plan:queue && task plan:approve -- <project>"
+          echo "  7. task agent:run"
 
   plan:queue:
     desc: "Plan all unstarted projects in queue.md"
@@ -84,6 +94,7 @@ tasks:
     desc: "Run all approved projects overnight"
     cmds:
       - task: agent:checkpoint
+      - task: secrets:pull
       - task: agent:budget-check
       - task: agent:plan
       - cmd: |
@@ -211,12 +222,94 @@ tasks:
           echo "/$SKILL" >> ".claude/skills/$SKILL/SKILL.md"
           echo "Created: .claude/skills/$SKILL/SKILL.md"
 
+  hooks:test:
+    desc: "Verify all safety hooks block what they claim to block"
+    cmds:
+      - cmd: |
+          chmod +x .claude/hooks/*.sh 2>/dev/null || true
+          bash scripts/test-hooks.sh
+
+  secrets:check:
+    desc: "Verify Bitwarden CLI is installed and reachable"
+    cmds:
+      - cmd: |
+          bash scripts/bw-env.sh --check 2>/dev/null \
+            || echo "bw-env: Bitwarden CLI not configured — install: npm i -g @bitwarden/cli"
+
+  secrets:pull:
+    desc: "Pull all workspace secrets from Bitwarden into .env"
+    cmds:
+      - cmd: |
+          if ! command -v bw &>/dev/null; then
+            echo "secrets:pull: bw CLI not installed — skipping (run manually later)"
+            exit 0
+          fi
+          bash scripts/bw-env.sh
+
+  secrets:list:
+    desc: "List secret keys stored in Bitwarden for this workspace"
+    cmds:
+      - cmd: bash scripts/bw-env.sh --list
+
+  secrets:set:
+    desc: "Create or update a secret in Bitwarden. Usage: task secrets:set -- KEY_NAME value"
+    vars:
+      KEY: '{{index .CLI_ARGS 0}}'
+      VAL: '{{index .CLI_ARGS 1}}'
+    cmds:
+      - cmd: |
+          KEY="{{.KEY}}"
+          VAL="{{.VAL}}"
+          if [ -z "$KEY" ] || [ -z "$VAL" ]; then
+            echo "Usage: task secrets:set -- KEY_NAME value"
+            exit 1
+          fi
+          ITEM_NAME="autonomous-workspace/$KEY"
+
+          # Ensure session
+          if [ -z "${BW_SESSION:-}" ]; then
+            echo "Unlocking Bitwarden vault..."
+            BW_SESSION=$(bw unlock --raw)
+            export BW_SESSION
+          fi
+
+          bw sync --session "$BW_SESSION" --quiet 2>/dev/null || true
+
+          # Check if item exists
+          EXISTING_ID=$(bw list items --search "$ITEM_NAME" --session "$BW_SESSION" 2>/dev/null \
+            | jq -r --arg n "$ITEM_NAME" '.[] | select(.name == $n) | .id' | head -1)
+
+          if [ -n "$EXISTING_ID" ]; then
+            # Update password on existing item
+            UPDATED=$(bw get item "$EXISTING_ID" --session "$BW_SESSION" \
+              | jq --arg v "$VAL" '.login.password = $v')
+            echo "$UPDATED" | bw encode | bw edit item "$EXISTING_ID" --session "$BW_SESSION" > /dev/null
+            echo "Updated: $ITEM_NAME"
+          else
+            # Create new login item
+            bw get template item --session "$BW_SESSION" \
+              | jq --arg n "$ITEM_NAME" --arg v "$VAL" \
+                '.type=1 | .name=$n | .login={username:($n),password:$v}' \
+              | bw encode | bw create item --session "$BW_SESSION" > /dev/null
+            echo "Created: $ITEM_NAME"
+          fi
+          echo "Run 'task secrets:pull' to refresh .env"
+
   git:hooks:
     desc: "Reinstall git hooks"
     cmds:
       - cmd: |
           mkdir -p .git/hooks
-          printf '#!/usr/bin/env bash\nwhile IFS=\' \' read -r local_ref local_sha remote_ref remote_sha; do\n  if echo "$remote_ref" | grep -qE \'refs/heads/(main|master)$\'; then\n    echo "ERROR: Direct push to main/master blocked."\n    exit 1\n  fi\ndone\nexit 0\n' > .git/hooks/pre-push
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'while read -r local_ref local_sha remote_ref remote_sha; do'
+            echo '  if echo "$remote_ref" | grep -qE "refs/heads/(main|master)$"; then'
+            echo '    echo "ERROR: Direct push to main/master blocked."'
+            echo '    exit 1'
+            echo '  fi'
+            echo 'done'
+            echo 'exit 0'
+          } > .git/hooks/pre-push
           chmod +x .git/hooks/pre-push 2>/dev/null || true
           echo "Git hooks installed"
 

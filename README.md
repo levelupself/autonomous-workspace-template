@@ -16,9 +16,9 @@ Open `home.md` in Obsidian to see everything.
 ## Quick start
 
 ```bash
-# 1. Clone the repo
-git clone <your-repo>
-cd <repo>
+# 1. Use this template on GitHub, then clone your new repo
+git clone https://github.com/<you>/autonomous-workspace
+cd autonomous-workspace
 
 # 2. Install dependencies
 npm install -g @anthropic-ai/claude-code
@@ -27,9 +27,8 @@ npm install -g @anthropic-ai/claude-code
 # 3. Run setup (makes hooks executable, installs git hooks)
 task setup
 
-# 4. Add a project
-task project:new
-# — fill out the template in queue.md
+# 4. Add a project — edit queue.md and fill out the template
+#    (see queue.md for the template)
 
 # 5. Plan it (planner-opus creates scope + stages, you review)
 task plan:queue
@@ -164,14 +163,24 @@ Off-peak window (10 PM – 5 AM PT) burns the quota slower — schedule runs her
 - jq — for hook JSON parsing (`brew install jq` / `apt install jq`)
 - Obsidian — for vault UI (free download at obsidian.md)
 
-## Environment
+## Authentication
 
-Set in your shell or CI:
+This workspace works with either a **Claude Pro/Max subscription** or an **Anthropic API key**.
+
+**Claude Pro/Max (no API key needed):**
+```bash
+# Claude Code uses your browser login automatically
+claude login
+```
+
+**Anthropic API key:**
 ```bash
 export ANTHROPIC_API_KEY=your_key_here
 ```
 
-For secrets in projects, use Bitwarden CLI:
+The main difference: Pro/Max subscriptions have a 5-hour usage window with rate limits, while API access is pay-per-token. The workspace handles both — the `stop-write-back.sh` hook writes `paused_usage_limit` state when the usage window is hit, and the next run resumes automatically.
+
+For project secrets (API keys your agents need), use Bitwarden CLI:
 ```bash
 bw get password "project-name/service-name"
 ```
