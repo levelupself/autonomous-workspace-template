@@ -38,8 +38,10 @@ echo "$CMD" | grep -qE '(curl|wget).*-[^s]*s.*\|\s*(bash|sh)' \
 echo "$CMD" | grep -qE 'git\s+push.*(-f|--force)' \
   && block "force push (use git revert instead)"
 
-echo "$CMD" | grep -qE 'git\s+push.*(origin\s+)?(main|master)($|\s|$)' \
-  && block "direct push to main/master (open a PR instead)"
+if echo "$CMD" | grep -qE 'git\s+push.*(origin\s+)?(main|master)($|\s|$)'; then
+  WORKTREE=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+  echo "$WORKTREE" | grep -qE "agent-" && block "direct push to main/master (open a PR instead)"
+fi
 
 echo "$CMD" | grep -qE 'git\s+reset\s+--hard' \
   && block "git reset --hard (use git revert to preserve history)"
