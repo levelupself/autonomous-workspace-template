@@ -1,0 +1,254 @@
+version: '3'
+
+vars:
+  MIN_BUDGET_PCT: '20'
+
+tasks:
+
+  setup:
+    desc: "Initialize workspace on a new machine"
+    cmds:
+      - cmd: |
+          echo "Setting up autonomous dev workspace..."
+          chmod +x .claude/hooks/*.sh 2>/dev/null || echo "(chmod skipped on Windows)"
+          chmod +x .claude/skills/jwt-validator/scripts/validate.sh 2>/dev/null || true
+          chmod +x .claude/skills/schema-retry/scripts/retry.sh 2>/dev/null || true
+          mkdir -p .git/hooks
+          printf '#!/usr/bin/env bash\nwhile IFS=\' \' read -r local_ref local_sha remote_ref remote_sha; do\n  if echo "$remote_ref" | grep -qE \'refs/heads/(main|master)$\'; then\n    echo "ERROR: Direct push to main/master blocked."\n    exit 1\n  fi\ndone\nexit 0\n' > .git/hooks/pre-push
+          chmod +x .git/hooks/pre-push 2>/dev/null || true
+          echo ""
+          echo "Setup complete. Next steps:"
+          echo "  1. Add a project to queue.md"
+          echo "  2. task plan:queue"
+          echo "  3. task plan:review"
+          echo "  4. task plan:approve -- your-project"
+          echo "  5. task agent:run"
+
+  plan:queue:
+    desc: "Plan all unstarted projects in queue.md"
+    cmds:
+      - cmd: |
+          echo "Running meta-planner..."
+          claude --dangerously-skip-permissions --agent meta-planner -p "Process queue.md. For each new project entry without a status, invoke planner-opus to create a full plan. Mark each as awaiting_approval when done. Report what was created."
+
+  plan:approve:
+    desc: "Approve a project plan. Usage: task plan:approve -- project-name"
+    vars:
+      PROJECT: '{{.CLI_ARGS}}'
+    cmds:
+      - cmd: |
+          PROJECT="{{.PROJECT}}"
+          if [ -z "$PROJECT" ]; then echo "Usage: task plan:approve -- project-name"; exit 1; fi
+          SCOPE="projects/$PROJECT/docs/scope.md"
+          if [ ! -f "$SCOPE" ]; then echo "Error: $SCOPE not found. Run: task plan:queue first"; exit 1; fi
+          sed -i "s/\*\*Status:\*\* .*/\*\*Status:\*\* approved/" "$SCOPE" 2>/dev/null || true
+          sed -i "s/status: awaiting_approval/status: active/" "projects/$PROJECT/docs/stages.md" 2>/dev/null || true
+          echo "Approved: $PROJECT"
+          echo "Run: task agent:run"
+
+  plan:review:
+    desc: "Show projects awaiting plan approval"
+    cmds:
+      - cmd: |
+          echo "=== Awaiting approval ==="
+          grep -rl "awaiting_approval" projects/ 2>/dev/null | grep "scope.md" | sed "s|projects/||;s|/docs/scope.md||" || echo "  None"
+          echo ""
+          echo "To approve: task plan:approve -- project-name"
+
+  agent:checkpoint:
+    desc: "Git snapshot before any agent run"
+    cmds:
+      - git add -A
+      - git diff --cached --stat
+      - cmd: git commit -m 'checkpoint pre-agent-run' || echo '(nothing to commit)'
+      - cmd: echo "Checkpoint created"
+
+  agent:budget-check:
+    desc: "Check usage budget before running"
+    cmds:
+      - cmd: |
+          echo "Checking usage budget..."
+          bash .claude/hooks/pre-run-budget-check.sh 2>/dev/null || echo "(budget check skipped)"
+
+  agent:plan:
+    desc: "Run meta-planner to generate tonight.md"
+    cmds:
+      - cmd: |
+          echo "Running meta-planner..."
+          claude --dangerously-skip-permissions --agent meta-planner -p "Read all project stages.md files and queue.md. Score and prioritize. Write .claude/tasks/tonight.md. Report schedule."
+          echo ""
+          echo "=== Tonight plan ==="
+          cat .claude/tasks/tonight.md 2>/dev/null || echo "Not created"
+
+  agent:run:
+    desc: "Run all approved projects overnight"
+    cmds:
+      - task: agent:checkpoint
+      - task: agent:budget-check
+      - task: agent:plan
+      - cmd: |
+          echo ""
+          echo "Launching agents..."
+          PROJECTS=$(grep "^## " .claude/tasks/tonight.md 2>/dev/null | sed "s/^## //" || echo "")
+          if [ -z "$PROJECTS" ]; then echo "No projects scheduled. Run: task agent:plan"; exit 0; fi
+          echo "$PROJECTS" | while IFS= read -r project; do
+            [ -z "$project" ] && continue
+            echo "Starting: $project"
+            claude --worktree "agent-${project}-$(date +%Y%m%d 2>/dev/null || echo run)" --dangerously-skip-permissions --agent orchestrator -p "Project: $project. Read tonight.md for your task block then execute." &
+            echo "  PID $!"
+          done
+          wait
+          echo "All agents completed."
+
+  agent:run-single:
+    desc: "Run one project. Usage: task agent:run-single -- project-name"
+    vars:
+      PROJECT: '{{.CLI_ARGS}}'
+    cmds:
+      - task: agent:checkpoint
+      - cmd: |
+          PROJECT="{{.PROJECT}}"
+          if [ -z "$PROJECT" ]; then echo "Usage: task agent:run-single -- project-name"; exit 1; fi
+          echo "Starting: $PROJECT"
+          claude --worktree "agent-${PROJECT}-$(date +%Y%m%d 2>/dev/null || echo run)" --dangerously-skip-permissions --agent orchestrator -p "Project: $PROJECT. Read projects/$PROJECT/docs/stages.md for current stage and execute."
+
+  agent:status:
+    desc: "Show running agents and recent sessions"
+    cmds:
+      - cmd: |
+          echo "=== Active worktrees ==="
+          git worktree list 2>/dev/null | grep "agent-" || echo "  None"
+          echo ""
+          echo "=== Recent sessions ==="
+          tail -20 .claude/logs/sessions.log 2>/dev/null || echo "  None yet"
+
+  agent:diff:
+    desc: "Show what agent branches changed vs main"
+    cmds:
+      - cmd: |
+          echo "=== Agent branches ==="
+          git branch 2>/dev/null | grep "worktree-agent" || echo "  None"
+          git branch 2>/dev/null | grep "worktree-agent" | tr -d " " | while IFS= read -r branch; do
+            echo "-- $branch --"
+            git log --oneline "main..$branch" 2>/dev/null | head -10 || true
+          done
+
+  agent:discard:
+    desc: "Remove agent worktree. Usage: task agent:discard -- project-name"
+    vars:
+      PROJECT: '{{.CLI_ARGS}}'
+    cmds:
+      - cmd: |
+          PROJECT="{{.PROJECT}}"
+          if [ -z "$PROJECT" ]; then echo "Usage: task agent:discard -- project-name"; exit 1; fi
+          git worktree list 2>/dev/null | grep "$PROJECT" | awk "{print $1}" | while IFS= read -r wt; do
+            git worktree remove --force "$wt" && echo "Removed: $wt"
+          done
+
+  agent:resume:
+    desc: "Resume a paused project. Usage: task agent:resume -- project-name"
+    vars:
+      PROJECT: '{{.CLI_ARGS}}'
+    cmds:
+      - task: agent:run-single
+        vars:
+          CLI_ARGS: '{{.PROJECT}}'
+
+  morning:review:
+    desc: "Show everything needing attention this morning"
+    cmds:
+      - cmd: |
+          echo "========================================"
+          echo "  Morning Review"
+          echo "========================================"
+          echo ""
+          echo "=== Needs your decision ==="
+          grep -A3 "Awaiting your decision" home.md 2>/dev/null | grep "###" | sed "s/### /  !  /" || echo "  Nothing"
+          echo ""
+          echo "=== Plans awaiting approval ==="
+          grep -rl "awaiting_approval" projects/ 2>/dev/null | grep "scope.md" | sed "s|projects/||;s|/docs/scope.md||;s/^/  /" || echo "  None"
+          echo ""
+          echo "=== Open PRs ==="
+          gh pr list --label "agent-generated" 2>/dev/null || echo "  (gh CLI not configured)"
+          echo ""
+          echo "=== Project statuses ==="
+          for f in projects/*/docs/stages.md; do
+            [ -f "$f" ] || continue
+            proj=$(echo "$f" | sed "s|projects/||;s|/docs/stages.md||")
+            status=$(grep "^status:" "$f" 2>/dev/null | head -1 | sed "s/status: //" || echo "unknown")
+            echo "  $proj -- $status"
+          done
+
+  skill:list:
+    desc: "List all available skills"
+    cmds:
+      - cmd: |
+          echo "=== Skills ==="
+          for f in .claude/skills/*/SKILL.md; do
+            [ -f "$f" ] || continue
+            skill=$(echo "$f" | sed "s|.claude/skills/||;s|/SKILL.md||")
+            echo "  /$skill"
+          done
+
+  skill:create:
+    desc: "Scaffold a new skill. Usage: task skill:create -- skill-name"
+    vars:
+      SKILL: '{{.CLI_ARGS}}'
+    cmds:
+      - cmd: |
+          SKILL="{{.SKILL}}"
+          if [ -z "$SKILL" ]; then echo "Usage: task skill:create -- skill-name"; exit 1; fi
+          mkdir -p ".claude/skills/$SKILL/scripts"
+          echo "---" > ".claude/skills/$SKILL/SKILL.md"
+          echo "name: $SKILL" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "description: TODO one sentence. When to use it." >> ".claude/skills/$SKILL/SKILL.md"
+          echo "allowed-tools: Read, Write, Bash, Glob" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "---" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "# $SKILL" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "## Usage" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "/$SKILL" >> ".claude/skills/$SKILL/SKILL.md"
+          echo "Created: .claude/skills/$SKILL/SKILL.md"
+
+  git:hooks:
+    desc: "Reinstall git hooks"
+    cmds:
+      - cmd: |
+          mkdir -p .git/hooks
+          printf '#!/usr/bin/env bash\nwhile IFS=\' \' read -r local_ref local_sha remote_ref remote_sha; do\n  if echo "$remote_ref" | grep -qE \'refs/heads/(main|master)$\'; then\n    echo "ERROR: Direct push to main/master blocked."\n    exit 1\n  fi\ndone\nexit 0\n' > .git/hooks/pre-push
+          chmod +x .git/hooks/pre-push 2>/dev/null || true
+          echo "Git hooks installed"
+
+  project:status:
+    desc: "Project status. Usage: task project:status -- project-name"
+    vars:
+      PROJECT: '{{.CLI_ARGS}}'
+    cmds:
+      - cmd: |
+          PROJECT="{{.PROJECT}}"
+          if [ -z "$PROJECT" ]; then echo "Usage: task project:status -- project-name"; exit 1; fi
+          echo "=== $PROJECT ==="
+          head -60 "projects/$PROJECT/docs/stages.md" 2>/dev/null || echo "Not found"
+          echo ""
+          tail -5 "projects/$PROJECT/metrics/tokens.md" 2>/dev/null || true
+
+  logs:
+    desc: "Show recent logs"
+    cmds:
+      - cmd: |
+          echo "=== Sessions ==="
+          tail -20 .claude/logs/sessions.log 2>/dev/null || echo "Empty"
+          echo ""
+          echo "=== Supervisor ==="
+          tail -20 .claude/logs/supervisor.log 2>/dev/null || echo "Empty"
+
+  clean:worktrees:
+    desc: "Remove completed agent worktrees"
+    cmds:
+      - cmd: |
+          git worktree list 2>/dev/null | grep "agent-" | awk "{print $1}" | while IFS= read -r wt; do
+            git worktree remove --force "$wt" 2>/dev/null && echo "Removed: $wt" || echo "Skipped: $wt"
+          done
+          git worktree prune 2>/dev/null || true
+          echo "Done"

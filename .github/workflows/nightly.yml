@@ -1,0 +1,91 @@
+name: Nightly agent run
+
+on:
+  schedule:
+    # 10 PM PT = 05:00 UTC (off-peak window)
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+    inputs:
+      project:
+        description: 'Specific project to run (leave empty for all)'
+        required: false
+        type: string
+
+jobs:
+  overnight-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240  # 4 hour max
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install Taskfile
+        run: |
+          sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Configure git
+        run: |
+          git config --global user.email "agent@autonomous-dev"
+          git config --global user.name "Autonomous Agent"
+
+      - name: Make hooks executable
+        run: chmod +x .claude/hooks/*.sh
+
+      - name: Check budget before run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # In CI we skip the interactive /usage check and rely on API headers
+          echo "Budget check: proceeding in CI mode"
+
+      - name: Run meta-planner
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude \
+            --dangerously-skip-permissions \
+            --agent meta-planner \
+            -p "Read all project stages.md files. Write tonight.md. Report schedule."
+
+      - name: Run agents
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [[ -n "${{ inputs.project }}" ]]; then
+            echo "Running single project: ${{ inputs.project }}"
+            claude \
+              --worktree "agent-${{ inputs.project }}-$(date +%Y%m%d)" \
+              --dangerously-skip-permissions \
+              --agent orchestrator \
+              -p "You are working on project: ${{ inputs.project }}. Read stages.md and tonight.md for your task block."
+          else
+            task agent:run
+          fi
+
+      - name: Commit vault updates
+        run: |
+          git add home.md projects/*/docs/ projects/*/metrics/ .claude/tasks/
+          git diff --cached --stat
+          git commit -m "chore: overnight agent run $(date +%Y-%m-%d) [skip ci]" \
+            || echo "Nothing to commit"
+          git push origin main || echo "Push failed — check branch protection"
+
+      - name: Upload session logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-logs-${{ github.run_id }}
+          path: .claude/logs/
+          retention-days: 7

@@ -1,0 +1,12 @@
+{
+  "defaultViewMode": "source",
+  "livePreview": true,
+  "legacyEditor": false,
+  "showLineNumber": false,
+  "strictLineBreaks": false,
+  "foldHeading": true,
+  "foldIndent": true,
+  "newLinkFormat": "relative",
+  "useMarkdownLinks": false,
+  "attachmentFolderPath": ".attachments"
+}

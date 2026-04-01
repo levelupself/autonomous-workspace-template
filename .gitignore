@@ -1,0 +1,51 @@
+# Obsidian
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/plugins/
+.obsidian/themes/
+
+# Claude Code worktrees (these live inside .claude/ but are checked out dirs)
+.claude/worktrees/
+
+# Logs — kept locally, not committed
+.claude/logs/
+
+# Tonight's run plan — generated fresh each night
+.claude/tasks/tonight.md
+
+# Node
+node_modules/
+npm-debug.log*
+.npm
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Go
+bin/
+*.test
+
+# Env files — secrets never committed
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# Build artifacts
+*.o
+*.a
+*.so
